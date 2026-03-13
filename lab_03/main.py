@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw
 WINDOW_WIDTH = 1350
 WINDOW_HEIGHT = 900
 CANVAS_SIZE = 860
+DEFAULT_BG_COLOR = "#000000"
 
 
 @dataclass
@@ -39,7 +40,7 @@ class PseudoPixelCanvas:
         self.cell_size = 8
         self.offset_x = 0
         self.offset_y = 0
-        self.bg_hex = "#000000"
+        self.bg_hex = DEFAULT_BG_COLOR
         self.bg_rgb = (0, 0, 0)
         self.grid_line_color = "#494949"
 
@@ -60,7 +61,7 @@ class PseudoPixelCanvas:
 
         self.clear(self.bg_hex)
 
-    def clear(self, bg_hex: str = "#000000"):
+    def clear(self, bg_hex: str = DEFAULT_BG_COLOR):
         self.bg_hex = bg_hex
         self.bg_rgb = hex_to_rgb(bg_hex)
         self.canvas.delete("all")
@@ -486,7 +487,6 @@ class App:
         color_row = tk.Frame(controls)
         color_row.pack(fill="x", pady=4)
         self.entry_color = self._labeled_entry(color_row, "line #RRGGBB", "#00FF66")
-        self.entry_bg = self._labeled_entry(color_row, "background #RRGGBB", "#000000")
 
         grid_row = tk.Frame(controls)
         grid_row.pack(fill="x", pady=4)
@@ -604,22 +604,16 @@ class App:
         try:
             grid_w = int(self.entry_grid_w.get())
             grid_h = int(self.entry_grid_h.get())
-            bg = self.normalize_hex(self.entry_bg.get())
         except ValueError as exc:
             messagebox.showerror("Input Error", str(exc))
             return
 
         self.pp_canvas.update_grid(grid_w, grid_h)
-        self.pp_canvas.clear(bg)
+        self.pp_canvas.clear(DEFAULT_BG_COLOR)
         self.status.set(f"Grid applied: {grid_w}x{grid_h}")
 
     def clear_canvas(self):
-        try:
-            bg = self.normalize_hex(self.entry_bg.get())
-        except ValueError as exc:
-            messagebox.showerror("Input Error", str(exc))
-            return
-        self.pp_canvas.clear(bg)
+        self.pp_canvas.clear(DEFAULT_BG_COLOR)
         self.status.set("Canvas cleared")
 
     def parse_segment(
@@ -629,7 +623,6 @@ class App:
         int,
         int,
         int,
-        str,
         str,
         Callable[[int, int, int, int], list[Pixel]],
     ]:
@@ -642,13 +635,12 @@ class App:
             raise ValueError("Coordinates must be numeric")
 
         line_color = self.normalize_hex(self.entry_color.get())
-        bg_color = self.normalize_hex(self.entry_bg.get())
 
         algo_name = self.primary_algo.get()
         if algo_name not in self.algorithms:
             raise ValueError("Select a valid primary algorithm")
 
-        return x0, y0, x1, y1, line_color, bg_color, self.algorithms[algo_name]
+        return x0, y0, x1, y1, line_color, self.algorithms[algo_name]
 
     def normalize_hex(self, color_value: str) -> str:
         rgb = hex_to_rgb(color_value)
@@ -656,12 +648,12 @@ class App:
 
     def draw_segment(self):
         try:
-            x0, y0, x1, y1, line_color, bg_color, algorithm = self.parse_segment()
+            x0, y0, x1, y1, line_color, algorithm = self.parse_segment()
         except ValueError as exc:
             messagebox.showerror("Input Error", str(exc))
             return
 
-        self.pp_canvas.clear(bg_color)
+        self.pp_canvas.clear(DEFAULT_BG_COLOR)
         pixels = algorithm(x0, y0, x1, y1)
         self.pp_canvas.draw_pixels(pixels, line_color)
         self.status.set(
@@ -670,7 +662,7 @@ class App:
 
     def parse_research_common(
         self,
-    ) -> tuple[float, float, float, float, str, str]:
+    ) -> tuple[float, float, float, float, str]:
         try:
             length = float(self.entry_length.get())
             ang_start = float(self.entry_ang_start.get())
@@ -687,12 +679,11 @@ class App:
             raise ValueError("ang end must be >= ang start")
 
         line_color = self.normalize_hex(self.entry_color.get())
-        bg_color = self.normalize_hex(self.entry_bg.get())
-        return length, ang_start, ang_end, ang_step, line_color, bg_color
+        return length, ang_start, ang_end, ang_step, line_color
 
     def research_visual(self):
         try:
-            length, ang_start, ang_end, ang_step, line_color, bg_color = (
+            length, ang_start, ang_end, ang_step, line_color = (
                 self.parse_research_common()
             )
             primary_name = self.primary_algo.get()
@@ -710,7 +701,7 @@ class App:
             messagebox.showerror("Input Error", str(exc))
             return
 
-        self.pp_canvas.clear(bg_color)
+        self.pp_canvas.clear(DEFAULT_BG_COLOR)
         angle = ang_start
         rays = 0
         while angle <= ang_end + 1e-9:
@@ -719,7 +710,7 @@ class App:
             y1 = int(round(length * math.sin(radians)))
 
             self.pp_canvas.draw_pixels(algo_a(0, 0, x1, y1), line_color)
-            self.pp_canvas.draw_pixels(algo_b(0, 0, x1, y1), bg_color)
+            self.pp_canvas.draw_pixels(algo_b(0, 0, x1, y1), DEFAULT_BG_COLOR)
 
             rays += 1
             angle += ang_step
@@ -731,7 +722,7 @@ class App:
 
     def research_timing(self):
         try:
-            length, ang_start, ang_end, ang_step, _, _ = self.parse_research_common()
+            length, ang_start, ang_end, ang_step, _ = self.parse_research_common()
             repeats = int(float(self.entry_repeats.get()))
             if repeats <= 0:
                 raise ValueError("timing repeats must be positive")
@@ -770,7 +761,7 @@ class App:
 
     def research_staircase(self):
         try:
-            length, ang_start, ang_end, ang_step, _, _ = self.parse_research_common()
+            length, ang_start, ang_end, ang_step, _ = self.parse_research_common()
             algo_name = self.primary_algo.get()
             if algo_name not in self.algorithms:
                 raise ValueError("Select a valid algorithm")
