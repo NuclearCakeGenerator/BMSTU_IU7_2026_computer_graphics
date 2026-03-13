@@ -522,12 +522,6 @@ class App:
             anchor="w"
         )
 
-        research_algos = tk.Frame(controls)
-        research_algos.pack(fill="x", pady=4)
-        self.secondary_algo = self._labeled_combo(
-            research_algos, "overlay algo", list(self.algorithms.keys()), 3
-        )
-
         research_params_1 = tk.Frame(controls)
         research_params_1.pack(fill="x", pady=4)
         self.entry_length = self._labeled_entry(research_params_1, "length", "50")
@@ -538,11 +532,15 @@ class App:
         self.entry_ang_end = self._labeled_entry(research_params_2, "ang end", "90")
         self.entry_ang_step = self._labeled_entry(research_params_2, "ang step", "2")
 
-        self.entry_repeats = self._single_entry(controls, "timing repeats", "300")
+        self.entry_repeats = self._single_entry(
+            controls,
+            "timing repeats (benchmark loops)",
+            "300",
+        )
 
         tk.Button(
             controls,
-            text="Research visual characteristics",
+            text="Research visual overlay",
             command=self.research_visual,
             cursor="hand2",
         ).pack(fill="x", pady=3)
@@ -584,21 +582,6 @@ class App:
         entry.insert(0, default)
         entry.pack(fill="x")
         return entry
-
-    def _labeled_combo(
-        self,
-        parent: tk.Widget,
-        label: str,
-        values: list[str],
-        default_index: int,
-    ) -> ttk.Combobox:
-        frame = tk.Frame(parent)
-        frame.pack(side="left", fill="x", expand=True, padx=2)
-        ttk.Label(frame, text=label).pack(anchor="w")
-        combo = ttk.Combobox(frame, state="readonly", values=values)
-        combo.current(default_index)
-        combo.pack(fill="x")
-        return combo
 
     def apply_grid(self):
         try:
@@ -653,11 +636,10 @@ class App:
             messagebox.showerror("Input Error", str(exc))
             return
 
-        self.pp_canvas.clear(DEFAULT_BG_COLOR)
         pixels = algorithm(x0, y0, x1, y1)
         self.pp_canvas.draw_pixels(pixels, line_color)
         self.status.set(
-            f"Drawn with {self.primary_algo.get()}: {len(pixels)} pseudo-pixels"
+            f"Added segment with {self.primary_algo.get()}: {len(pixels)} pseudo-pixels"
         )
 
     def parse_research_common(
@@ -687,21 +669,14 @@ class App:
                 self.parse_research_common()
             )
             primary_name = self.primary_algo.get()
-            secondary_name = self.secondary_algo.get()
+            if primary_name not in self.algorithms:
+                raise ValueError("Select a valid algorithm")
 
-            if (
-                primary_name not in self.algorithms
-                or secondary_name not in self.algorithms
-            ):
-                raise ValueError("Select both primary and overlay algorithms")
-
-            algo_a = self.algorithms[primary_name]
-            algo_b = self.algorithms[secondary_name]
+            algorithm = self.algorithms[primary_name]
         except ValueError as exc:
             messagebox.showerror("Input Error", str(exc))
             return
 
-        self.pp_canvas.clear(DEFAULT_BG_COLOR)
         angle = ang_start
         rays = 0
         while angle <= ang_end + 1e-9:
@@ -709,16 +684,12 @@ class App:
             x1 = int(round(length * math.cos(radians)))
             y1 = int(round(length * math.sin(radians)))
 
-            self.pp_canvas.draw_pixels(algo_a(0, 0, x1, y1), line_color)
-            self.pp_canvas.draw_pixels(algo_b(0, 0, x1, y1), DEFAULT_BG_COLOR)
+            self.pp_canvas.draw_pixels(algorithm(0, 0, x1, y1), line_color)
 
             rays += 1
             angle += ang_step
 
-        self.status.set(
-            f"Visual research complete: {primary_name} overlaid by {secondary_name},"
-            f" rays={rays}"
-        )
+        self.status.set(f"Visual overlay added: {primary_name}, rays={rays}")
 
     def research_timing(self):
         try:
