@@ -725,7 +725,8 @@ class App:
             angle += ang_step
 
         self.status.set(
-            f"Visual research complete: {primary_name} overlaid by {secondary_name}, rays={rays}"
+            f"Visual research complete: {primary_name} overlaid by {secondary_name},"
+            f" rays={rays}"
         )
 
     def research_timing(self):
