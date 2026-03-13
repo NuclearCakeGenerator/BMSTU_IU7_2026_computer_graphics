@@ -2,7 +2,7 @@ import math
 import time
 import tkinter as tk
 from dataclasses import dataclass
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, colorchooser
 from typing import Callable
 
 from PIL import Image, ImageDraw
@@ -484,9 +484,31 @@ class App:
         self.primary_algo.current(1)
         self.primary_algo.pack(fill="x", pady=4)
 
+        self.line_color_hex = "#00FF66"
         color_row = tk.Frame(controls)
         color_row.pack(fill="x", pady=4)
-        self.entry_color = self._labeled_entry(color_row, "line #RRGGBB", "#00FF66")
+        ttk.Label(
+            color_row,
+            text="Line color",
+            font=("Arial", 10, "bold"),
+        ).pack(side="left")
+        picker_row = tk.Frame(controls)
+        picker_row.pack(fill="x", pady=(0, 6))
+        tk.Button(
+            picker_row,
+            text="Pick color",
+            command=self.pick_line_color,
+            cursor="hand2",
+        ).pack(side="left")
+        self.color_preview = tk.Label(
+            picker_row,
+            width=10,
+            text=self.line_color_hex,
+            relief="sunken",
+            bg=self.line_color_hex,
+            fg="#000000",
+        )
+        self.color_preview.pack(side="left", padx=8)
 
         grid_row = tk.Frame(controls)
         grid_row.pack(fill="x", pady=4)
@@ -564,6 +586,7 @@ class App:
             wraplength=380,
             foreground="#0044AA",
         ).pack(anchor="w", pady=(8, 0))
+        self.update_color_preview()
 
     def _labeled_entry(self, parent: tk.Widget, label: str, default: str) -> tk.Entry:
         frame = tk.Frame(parent)
@@ -617,7 +640,7 @@ class App:
         except ValueError:
             raise ValueError("Coordinates must be numeric")
 
-        line_color = self.normalize_hex(self.entry_color.get())
+        line_color = self.line_color_hex
 
         algo_name = self.primary_algo.get()
         if algo_name not in self.algorithms:
@@ -628,6 +651,24 @@ class App:
     def normalize_hex(self, color_value: str) -> str:
         rgb = hex_to_rgb(color_value)
         return rgb_to_hex(rgb)
+
+    def pick_line_color(self):
+        selected = colorchooser.askcolor(
+            color=self.line_color_hex,
+            title="Choose line color",
+        )
+        color_hex = selected[1]
+        if not color_hex:
+            return
+        self.line_color_hex = self.normalize_hex(color_hex)
+        self.update_color_preview()
+
+    def update_color_preview(self):
+        self.color_preview.config(
+            text=self.line_color_hex,
+            bg=self.line_color_hex,
+            fg="#000000",
+        )
 
     def draw_segment(self):
         try:
@@ -660,7 +701,7 @@ class App:
         if ang_end < ang_start:
             raise ValueError("ang end must be >= ang start")
 
-        line_color = self.normalize_hex(self.entry_color.get())
+        line_color = self.line_color_hex
         return length, ang_start, ang_end, ang_step, line_color
 
     def research_visual(self):
