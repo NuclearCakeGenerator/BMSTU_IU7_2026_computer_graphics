@@ -298,26 +298,32 @@ def line_bres_smooth(x0: int, y0: int, x1: int, y1: int) -> list[Pixel]:
 
     intensity_max = 255.0
     m = dy / dx
-    m_int = m * intensity_max
-    w = intensity_max - m_int
     e = intensity_max / 2.0
 
     x = x0
     y = y0
-    pixels = []
+    pixels: list[Pixel] = []
 
     for _ in range(dx + 1):
-        pixels.append(Pixel(x, y, e / intensity_max))
-        if e <= w:
+        main_intensity = 1.0 - (e / intensity_max)
+        side_intensity = e / intensity_max
+
+        pixels.append(Pixel(x, y, main_intensity))
+        if swapped:
+            pixels.append(Pixel(x + sx, y, side_intensity))
+        else:
+            pixels.append(Pixel(x, y + sy, side_intensity))
+
+        e += m * intensity_max
+        if e < intensity_max:
             if swapped:
                 y += sy
             else:
                 x += sx
-            e += m_int
         else:
             x += sx
             y += sy
-            e -= w
+            e -= intensity_max
 
     return deduplicate_max_intensity(pixels)
 
@@ -551,8 +557,8 @@ class App:
 
         research_params_2 = tk.Frame(controls)
         research_params_2.pack(fill="x", pady=4)
-        self.entry_ang_end = self._labeled_entry(research_params_2, "ang end", "90")
-        self.entry_ang_step = self._labeled_entry(research_params_2, "ang step", "2")
+        self.entry_ang_end = self._labeled_entry(research_params_2, "ang end", "360")
+        self.entry_ang_step = self._labeled_entry(research_params_2, "ang step", "5")
 
         self.entry_repeats = self._single_entry(
             controls,
