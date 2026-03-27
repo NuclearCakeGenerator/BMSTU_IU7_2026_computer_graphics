@@ -338,38 +338,78 @@ class PlotCanvas:
             highlightbackground="#3A3A3A",
         )
         self.canvas.pack(fill="both", expand=True)
-        self.image = tk.PhotoImage(width=CANVAS_WIDTH, height=CANVAS_HEIGHT)
-        self.canvas.create_image((0, 0), image=self.image, anchor="nw")
         self.bg_color = "#000000"
+        self.virtual_pixel_size = 8
+        self.clear(self.bg_color)
+
+    def set_virtual_pixel_size(self, value: int):
+        self.virtual_pixel_size = max(1, min(80, value))
         self.clear(self.bg_color)
 
     def clear(self, bg_color: str):
         self.bg_color = bg_color
-        self.image.put(bg_color, to=(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT))
-        self.canvas.delete("overlay")
+        self.canvas.delete("all")
+        self.canvas.create_rectangle(
+            0,
+            0,
+            CANVAS_WIDTH,
+            CANVAS_HEIGHT,
+            fill=self.bg_color,
+            outline=self.bg_color,
+            tags="background",
+        )
         self._draw_axes()
 
     def _draw_axes(self):
         cx = CANVAS_WIDTH // 2
         cy = CANVAS_HEIGHT // 2
-        self.canvas.create_line(0, cy, CANVAS_WIDTH, cy, fill="#444444", tags="overlay")
+        self.canvas.create_line(
+            0,
+            cy,
+            CANVAS_WIDTH,
+            cy,
+            fill="#444444",
+            width=1,
+            tags="overlay",
+        )
         self.canvas.create_line(
             cx,
             0,
             cx,
             CANVAS_HEIGHT,
             fill="#444444",
+            width=1,
             tags="overlay",
         )
 
     def put_pixel(self, x: int, y: int, color: str):
-        sx = x + CANVAS_WIDTH // 2
-        sy = CANVAS_HEIGHT // 2 - y
-        if 0 <= sx < CANVAS_WIDTH and 0 <= sy < CANVAS_HEIGHT:
-            self.image.put(color, (sx, sy))
+        size = self.virtual_pixel_size
+        cx = CANVAS_WIDTH // 2
+        cy = CANVAS_HEIGHT // 2
+
+        sx_center = cx + x * size
+        sy_center = cy - y * size
+
+        x0 = sx_center - size // 2
+        y0 = sy_center - size // 2
+        x1 = x0 + size
+        y1 = y0 + size
+
+        if x1 < 0 or x0 > CANVAS_WIDTH or y1 < 0 or y0 > CANVAS_HEIGHT:
+            return
+
+        self.canvas.create_rectangle(
+            x0,
+            y0,
+            x1,
+            y1,
+            fill=color,
+            outline=color,
+            tags="pixels",
+        )
 
     def draw_pixels(self, pixels: list[Pixel], color: str):
-        for pixel in pixels:
+        for pixel in set(pixels):
             self.put_pixel(pixel.x, pixel.y, color)
 
 
@@ -432,6 +472,15 @@ class App:
 
         action_row = tk.Frame(controls)
         action_row.pack(fill="x", pady=6)
+        ttk.Label(action_row, text="Pixel size").pack(side="left", padx=(0, 4))
+        self.entry_pixel_size = tk.Entry(action_row, width=5)
+        self.entry_pixel_size.insert(0, "4")
+        self.entry_pixel_size.pack(side="left")
+        tk.Button(
+            action_row,
+            text="Apply",
+            command=self.apply_virtual_pixel_size,
+        ).pack(side="left", padx=4)
         tk.Button(
             action_row,
             text="Clear",
@@ -515,7 +564,7 @@ class App:
         self.circle_cx, self.circle_cy = self._pair_entries(
             self.tab_circle, "Center X", "0", "Center Y", "0"
         )
-        self.circle_r = self._single_entry(self.tab_circle, "Radius", "120")
+        self.circle_r = self._single_entry(self.tab_circle, "Radius", "20")
 
         ttk.Label(self.tab_circle, text="Algorithm").pack(anchor="w", pady=(6, 0))
         self.circle_algo = ttk.Combobox(
@@ -552,7 +601,7 @@ class App:
             self.tab_ellipse, "Center X", "0", "Center Y", "0"
         )
         self.ellipse_a, self.ellipse_b = self._pair_entries(
-            self.tab_ellipse, "Semi-axis a", "180", "Semi-axis b", "90"
+            self.tab_ellipse, "Semi-axis a", "30", "Semi-axis b", "15"
         )
 
         ttk.Label(self.tab_ellipse, text="Algorithm").pack(anchor="w", pady=(6, 0))
@@ -594,10 +643,10 @@ class App:
         )
 
         self.spec_r_start, self.spec_r_end = self._pair_entries(
-            self.tab_circle_spectrum, "Start radius", "20", "End radius", "220"
+            self.tab_circle_spectrum, "Start radius", "10", "End radius", "40"
         )
         self.spec_r_step, self.spec_count = self._pair_entries(
-            self.tab_circle_spectrum, "Radius step", "20", "Count", ""
+            self.tab_circle_spectrum, "Radius step", "3", "Count", ""
         )
 
         ttk.Label(self.tab_circle_spectrum, text="Algorithm").pack(
@@ -640,10 +689,10 @@ class App:
             self.tab_ellipse_spectrum, "Center X", "0", "Center Y", "0"
         )
         self.spec_ellipse_a0, self.spec_ellipse_b0 = self._pair_entries(
-            self.tab_ellipse_spectrum, "Start a", "40", "Start b", "20"
+            self.tab_ellipse_spectrum, "Start a", "10", "Start b", "8"
         )
         self.spec_ellipse_step, self.spec_ellipse_count = self._pair_entries(
-            self.tab_ellipse_spectrum, "Step", "15", "Count", "12"
+            self.tab_ellipse_spectrum, "Step", "5", "Count", "12"
         )
 
         axis_frame = tk.Frame(self.tab_ellipse_spectrum)
@@ -752,6 +801,18 @@ class App:
     def clear_canvas(self):
         self.plot.clear(self.bg_color)
         self.status.set("Canvas cleared")
+
+    def apply_virtual_pixel_size(self):
+        try:
+            size = self._parse_int(self.entry_pixel_size.get(), "Pixel size")
+            if size <= 0:
+                raise ValueError("Pixel size must be > 0")
+        except ValueError as exc:
+            messagebox.showerror("Input Error", str(exc))
+            return
+
+        self.plot.set_virtual_pixel_size(size)
+        self.status.set(f"Virtual pixel size set to {self.plot.virtual_pixel_size}")
 
     @staticmethod
     def _parse_int(value: str, title: str) -> int:
