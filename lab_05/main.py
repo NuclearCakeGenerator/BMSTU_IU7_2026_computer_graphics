@@ -1,4 +1,7 @@
+import math
+import time
 import tkinter as tk
+from dataclasses import dataclass
 from tkinter import colorchooser, messagebox
 
 from utils import (
@@ -14,6 +17,22 @@ from utils import (
 )
 
 
+@dataclass(frozen=True)
+class Edge:
+    x0: int
+    y0: int
+    x1: int
+    y1: int
+
+
+@dataclass
+class FillRuntime:
+    edges: list[Edge]
+    min_y: int
+    max_y: int
+    current_y: int
+
+
 class Lab05App:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -24,6 +43,7 @@ class Lab05App:
         self.mode = InteractionMode.EDITING
         self.step_index = 0
         self.step_plan: list[FillStep] = []
+        self.fill_runtime: FillRuntime | None = None
 
         self.contours: list[list[Point]] = []
         self.current_contour: list[Point] = []
@@ -200,6 +220,7 @@ class Lab05App:
             point.y + radius,
             fill="#F5F5F5",
             outline="#F5F5F5",
+            tags=("geometry",),
         )
         self.vertex_ids.append(vertex_id)
 
@@ -211,6 +232,7 @@ class Lab05App:
             end.y,
             fill="#FFFFFF",
             width=2,
+            tags=("geometry",),
         )
         self.segment_ids.append(segment_id)
 
@@ -279,6 +301,113 @@ class Lab05App:
     def _all_closed_contours(self) -> list[list[Point]]:
         return self.contours.copy()
 
+    def _build_edges(self) -> list[Edge]:
+        edges: list[Edge] = []
+        for contour in self.contours:
+            if len(contour) < 2:
+                continue
+
+            for index, start in enumerate(contour):
+                end = contour[(index + 1) % len(contour)]
+                if start.y == end.y:
+                    continue
+
+                if start.y < end.y:
+                    edges.append(Edge(start.x, start.y, end.x, end.y))
+                else:
+                    edges.append(Edge(end.x, end.y, start.x, start.y))
+
+        return edges
+
+    def _scanline_intersections(self, y: int, edges: list[Edge]) -> list[float]:
+        intersections: list[float] = []
+        for edge in edges:
+            if not (edge.y0 <= y < edge.y1):
+                continue
+
+            dy = edge.y1 - edge.y0
+            if dy == 0:
+                continue
+
+            x = edge.x0 + (y - edge.y0) * (edge.x1 - edge.x0) / dy
+            intersections.append(x)
+
+        intersections.sort()
+        return intersections
+
+    def _paint_fill_pixel(self, x: int, y: int):
+        self.canvas.create_rectangle(
+            x,
+            y,
+            x + 1,
+            y + 1,
+            fill=self.fill_color,
+            outline=self.fill_color,
+            width=0,
+            tags=("fill",),
+        )
+
+    def _paint_scanline(self, y: int) -> tuple[list[float], list[tuple[int, int]]]:
+        if self.fill_runtime is None:
+            return [], []
+
+        intersections = self._scanline_intersections(y, self.fill_runtime.edges)
+        painted_ranges: list[tuple[int, int]] = []
+
+        for index in range(0, len(intersections) - 1, 2):
+            left = intersections[index]
+            right = intersections[index + 1]
+            start_x = math.ceil(left)
+            end_x = math.floor(right)
+
+            if end_x < start_x:
+                continue
+
+            painted_ranges.append((start_x, end_x))
+            for x in range(start_x, end_x + 1):
+                self._paint_fill_pixel(x, y)
+
+        self.canvas.tag_raise("geometry")
+        return intersections, painted_ranges
+
+    def _format_ranges(self, ranges: list[tuple[int, int]]) -> str:
+        if not ranges:
+            return "нет интервалов"
+
+        parts = [f"[{start}, {end}]" for start, end in ranges]
+        return ", ".join(parts)
+
+    def _prepare_fill_runtime(self):
+        edges = self._build_edges()
+        if not edges:
+            self.fill_runtime = None
+            return
+
+        ys = [point.y for contour in self.contours for point in contour]
+        min_y = min(ys)
+        max_y = max(ys)
+        self.fill_runtime = FillRuntime(
+            edges=edges,
+            min_y=min_y,
+            max_y=max_y,
+            current_y=min_y,
+        )
+
+    def _reset_fill_layer(self):
+        self.canvas.delete("fill")
+
+    def _fill_all_scanlines(self) -> float:
+        self._reset_fill_layer()
+        self._prepare_fill_runtime()
+        if self.fill_runtime is None:
+            return 0.0
+
+        start_time = time.perf_counter()
+        for y in range(self.fill_runtime.min_y, self.fill_runtime.max_y):
+            self._paint_scanline(y)
+        self.canvas.update_idletasks()
+        return (time.perf_counter() - start_time) * 1000.0
+
     def _fill_immediately(self):
         if self.current_contour:
             messagebox.showwarning(
@@ -294,12 +423,29 @@ class Lab05App:
             )
             return
 
-        self._update_status(
-            "UI готов: нажата 'Закрасить'. Алгоритм еще не подключен (заглушка)."
+        self.mode = InteractionMode.EDITING
+        self.step_frame.pack_forget()
+        self._set_edit_controls_state("normal")
+
+        duration_ms = self._fill_all_scanlines()
+        if self.fill_runtime is None:
+            messagebox.showwarning(
+                "Нечего закрашивать",
+                "Не удалось построить список ребер для заливки.",
+            )
+            return
+
+        messagebox.showinfo(
+            "Результат заливки",
+            f"Заливка завершена. Время выполнения: {duration_ms:.2f} мс",
         )
+        self._update_status("Инстантная заливка выполнена.")
 
     def _build_step_plan(self):
-        self.step_plan = list(FillStep)
+        self.step_plan = [
+            FillStep.BUILD_EDGE_LIST,
+            FillStep.FIND_SCANLINE_RANGE,
+        ]
         self.step_index = 0
 
     def _start_step_mode(self):
@@ -317,22 +463,59 @@ class Lab05App:
             )
             return
 
+        self._reset_fill_layer()
+        self._prepare_fill_runtime()
+        if self.fill_runtime is None:
+            messagebox.showwarning(
+                "Нечего закрашивать",
+                "Не удалось построить список ребер для заливки.",
+            )
+            return
+
         self.mode = InteractionMode.STEP_FILL
         self._set_edit_controls_state("disabled")
         self.step_frame.pack(fill="x", pady=(10, 0))
         self._build_step_plan()
+        self.fill_runtime.current_y = self.fill_runtime.min_y
         self._update_status("Пошаговый режим включен. Нажмите 'Дальше'.")
 
     def _next_step(self):
         if self.mode is not InteractionMode.STEP_FILL:
             return
 
-        if self.step_index >= len(self.step_plan):
-            self._update_status("Пошаговая демонстрация завершена.")
+        if self.fill_runtime is None:
+            self._update_status("Заливка не подготовлена.")
             return
 
-        step = self.step_plan[self.step_index]
-        self._update_status(FILL_STEP_MESSAGES[step])
+        if self.step_index < len(self.step_plan):
+            step = self.step_plan[self.step_index]
+            if step is FillStep.BUILD_EDGE_LIST:
+                self._update_status(
+                    f"{FILL_STEP_MESSAGES[step]} Ребер: {len(self.fill_runtime.edges)}."
+                )
+            else:
+                self._update_status(
+                    f"{FILL_STEP_MESSAGES[step]} Диапазон: {self.fill_runtime.min_y}.."
+                    f"{self.fill_runtime.max_y - 1}."
+                )
+
+            self.step_index += 1
+            return
+
+        if self.fill_runtime.current_y >= self.fill_runtime.max_y:
+            self._update_status("Пошаговая заливка завершена.")
+            return
+
+        intersections, ranges = self._paint_scanline(self.fill_runtime.current_y)
+        self._update_status(
+            f"{FILL_STEP_MESSAGES[FillStep.NEXT_SCANLINE]} "
+            f"y={self.fill_runtime.current_y}, "
+            f"пересечений: {len(intersections)}, "
+            f"интервалы: {self._format_ranges(ranges)}."
+        )
+        self.fill_runtime.current_y += 1
+
+        self.canvas.update_idletasks()
         self.step_index += 1
 
     def _exit_step_mode(self):
@@ -342,6 +525,8 @@ class Lab05App:
         self.mode = InteractionMode.EDITING
         self.step_frame.pack_forget()
         self._set_edit_controls_state("normal")
+        self._reset_fill_layer()
+        self.fill_runtime = None
         self._update_status(
             "Выход из пошагового режима. Можно продолжать ввод контуров."
         )
@@ -362,6 +547,7 @@ class Lab05App:
         self.current_contour.clear()
         self.segment_ids.clear()
         self.vertex_ids.clear()
+        self.fill_runtime = None
         self._update_status("Холст очищен. Начните ввод вершин заново.")
 
 
