@@ -1,18 +1,17 @@
 import tkinter as tk
-from dataclasses import dataclass
 from tkinter import colorchooser, messagebox
 
-WINDOW_WIDTH = 1300
-WINDOW_HEIGHT = 900
-LEFT_PANEL_WIDTH = 320
-CANVAS_WIDTH = 920
-CANVAS_HEIGHT = 860
-
-
-@dataclass(frozen=True)
-class Point:
-    x: int
-    y: int
+from utils import (
+    CANVAS_HEIGHT,
+    CANVAS_WIDTH,
+    FILL_STEP_MESSAGES,
+    FillStep,
+    InteractionMode,
+    LEFT_PANEL_WIDTH,
+    Point,
+    WINDOW_HEIGHT,
+    WINDOW_WIDTH,
+)
 
 
 class Lab05App:
@@ -22,15 +21,14 @@ class Lab05App:
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
 
         self.fill_color = "#FF0000"
+        self.mode = InteractionMode.EDITING
+        self.step_index = 0
+        self.step_plan: list[FillStep] = []
 
         self.contours: list[list[Point]] = []
         self.current_contour: list[Point] = []
         self.segment_ids: list[int] = []
         self.vertex_ids: list[int] = []
-
-        self.in_step_mode = False
-        self.step_index = 0
-        self.step_plan: list[str] = []
 
         self._build_layout()
         self._bind_events()
@@ -94,8 +92,8 @@ class Lab05App:
             "Shift + Ctrl: авто H/V",
             "Кнопка 'Замкнуть': закрыть контур",
         ]
-        for line in hints:
-            tk.Label(self.hint_frame, text=line, anchor="w").pack(fill="x")
+        for text in hints:
+            tk.Label(self.hint_frame, text=text, anchor="w").pack(fill="x")
 
         self.btn_close = tk.Button(
             self.left_frame,
@@ -186,41 +184,40 @@ class Lab05App:
             title="Выберите цвет заливки",
             color=self.fill_color,
         )[1]
-        if not color:
+        if color is None:
             return
         self.fill_color = color.upper()
         self.color_preview.config(bg=self.fill_color)
         self.color_label.config(text=self.fill_color)
         self._update_status(f"Цвет заливки: {self.fill_color}")
 
-    def _draw_vertex(self, p: Point):
-        r = 3
+    def _draw_vertex(self, point: Point):
+        radius = 3
         vertex_id = self.canvas.create_oval(
-            p.x - r,
-            p.y - r,
-            p.x + r,
-            p.y + r,
+            point.x - radius,
+            point.y - radius,
+            point.x + radius,
+            point.y + radius,
             fill="#F5F5F5",
             outline="#F5F5F5",
         )
         self.vertex_ids.append(vertex_id)
 
-    def _draw_segment(self, p1: Point, p2: Point):
-        seg_id = self.canvas.create_line(
-            p1.x,
-            p1.y,
-            p2.x,
-            p2.y,
+    def _draw_segment(self, start: Point, end: Point):
+        segment_id = self.canvas.create_line(
+            start.x,
+            start.y,
+            end.x,
+            end.y,
             fill="#FFFFFF",
             width=2,
         )
-        self.segment_ids.append(seg_id)
+        self.segment_ids.append(segment_id)
 
     def _on_canvas_click(self, event: tk.Event):
-        if self.in_step_mode:
+        if self.mode is InteractionMode.STEP_FILL:
             self._update_status(
-                "Пошаговый режим активен. Нажмите 'Выход', "
-                "чтобы редактировать контуры."
+                "Пошаговый режим активен. Нажмите 'Выход', чтобы редактировать контуры."
             )
             return
 
@@ -261,7 +258,7 @@ class Lab05App:
         return current
 
     def _close_current_contour(self):
-        if self.in_step_mode:
+        if self.mode is InteractionMode.STEP_FILL:
             self._update_status("Нельзя замкнуть контур в пошаговом режиме.")
             return
 
@@ -272,13 +269,9 @@ class Lab05App:
             )
             return
 
-        first_point = self.current_contour[0]
-        last_point = self.current_contour[-1]
-        self._draw_segment(last_point, first_point)
-
+        self._draw_segment(self.current_contour[-1], self.current_contour[0])
         self.contours.append(self.current_contour.copy())
         self.current_contour.clear()
-
         self._update_status(
             f"Контур замкнут. Всего замкнутых контуров: {len(self.contours)}."
         )
@@ -294,28 +287,19 @@ class Lab05App:
             )
             return
 
-        contours = self._all_closed_contours()
-        if not contours:
+        if not self._all_closed_contours():
             messagebox.showwarning(
                 "Нет данных",
                 "Сначала задайте хотя бы один замкнутый контур.",
             )
             return
 
-        # Здесь будет вызов алгоритма заполнения со списком ребер и флагом.
         self._update_status(
             "UI готов: нажата 'Закрасить'. Алгоритм еще не подключен (заглушка)."
         )
 
     def _build_step_plan(self):
-        self.step_plan = [
-            "Шаг 1: сформировать список ребер по всем замкнутым контурам.",
-            "Шаг 2: найти диапазон строк сканирования (min_y..max_y).",
-            "Шаг 3: для текущей строки найти пересечения с активными ребрами.",
-            "Шаг 4: отсортировать X пересечений и переключать флаг inside/outside.",
-            "Шаг 5: закрасить интервалы, где флаг inside = True.",
-            "Шаг 6: перейти к следующей строке и повторить.",
-        ]
+        self.step_plan = list(FillStep)
         self.step_index = 0
 
     def _start_step_mode(self):
@@ -333,33 +317,33 @@ class Lab05App:
             )
             return
 
-        self.in_step_mode = True
+        self.mode = InteractionMode.STEP_FILL
         self._set_edit_controls_state("disabled")
         self.step_frame.pack(fill="x", pady=(10, 0))
         self._build_step_plan()
         self._update_status("Пошаговый режим включен. Нажмите 'Дальше'.")
 
     def _next_step(self):
-        if not self.in_step_mode:
+        if self.mode is not InteractionMode.STEP_FILL:
             return
 
         if self.step_index >= len(self.step_plan):
             self._update_status("Пошаговая демонстрация завершена.")
             return
 
-        self._update_status(self.step_plan[self.step_index])
+        step = self.step_plan[self.step_index]
+        self._update_status(FILL_STEP_MESSAGES[step])
         self.step_index += 1
 
     def _exit_step_mode(self):
-        if not self.in_step_mode:
+        if self.mode is not InteractionMode.STEP_FILL:
             return
 
-        self.in_step_mode = False
+        self.mode = InteractionMode.EDITING
         self.step_frame.pack_forget()
         self._set_edit_controls_state("normal")
         self._update_status(
-            "Выход из пошагового режима. "
-            "Можно продолжать ввод контуров."
+            "Выход из пошагового режима. Можно продолжать ввод контуров."
         )
 
     def _set_edit_controls_state(self, state: str):
@@ -370,7 +354,7 @@ class Lab05App:
         self.btn_choose_color.config(state=state)
 
     def _clear_canvas(self):
-        if self.in_step_mode:
+        if self.mode is InteractionMode.STEP_FILL:
             self._exit_step_mode()
 
         self.canvas.delete("all")
