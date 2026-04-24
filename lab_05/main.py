@@ -3,12 +3,11 @@ import time
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import colorchooser, messagebox
+from typing import Literal
 
 from utils import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
-    FILL_STEP_MESSAGES,
-    FillStep,
     InteractionMode,
     LEFT_PANEL_WIDTH,
     Point,
@@ -41,9 +40,8 @@ class Lab05App:
 
         self.fill_color = "#FF0000"
         self.mode = InteractionMode.EDITING
-        self.step_index = 0
-        self.step_plan: list[FillStep] = []
         self.fill_runtime: FillRuntime | None = None
+        self.fill_after_id: str | None = None
 
         self.contours: list[list[Point]] = []
         self.current_contour: list[Point] = []
@@ -135,12 +133,25 @@ class Lab05App:
 
         self.btn_fill_step = tk.Button(
             self.left_frame,
-            text="Закрасить по шагам",
-            command=self._start_step_mode,
+            text="Закрасить с задержкой",
+            command=self._start_delayed_fill,
             bg="#FFD8A8",
             cursor="hand2",
         )
         self.btn_fill_step.pack(fill="x", pady=(0, 8))
+
+        self.delay_frame = tk.Frame(self.left_frame)
+        self.delay_frame.pack(fill="x", pady=(0, 10))
+
+        tk.Label(self.delay_frame, text="Задержка (мс):").pack(side="left")
+        self.delay_var = tk.StringVar(value="50")
+        self.delay_entry = tk.Entry(
+            self.delay_frame,
+            textvariable=self.delay_var,
+            width=8,
+            justify="right",
+        )
+        self.delay_entry.pack(side="right")
 
         self.btn_clear = tk.Button(
             self.left_frame,
@@ -153,23 +164,16 @@ class Lab05App:
 
         self.step_frame = tk.LabelFrame(
             self.left_frame,
-            text="Пошаговая заливка",
+            text="Заливка с задержкой",
             padx=8,
             pady=8,
         )
-        self.btn_next_step = tk.Button(
-            self.step_frame,
-            text="Дальше",
-            command=self._next_step,
-            cursor="hand2",
-        )
         self.btn_exit_step = tk.Button(
             self.step_frame,
-            text="Выход",
-            command=self._exit_step_mode,
+            text="Остановить",
+            command=self._cancel_delayed_fill,
             cursor="hand2",
         )
-        self.btn_next_step.pack(fill="x", pady=(0, 6))
         self.btn_exit_step.pack(fill="x")
 
         tk.Label(self.right_frame, text="Статус:").pack(anchor="w")
@@ -239,7 +243,7 @@ class Lab05App:
     def _on_canvas_click(self, event: tk.Event):
         if self.mode is InteractionMode.STEP_FILL:
             self._update_status(
-                "Пошаговый режим активен. Нажмите 'Выход', чтобы редактировать контуры."
+                "Идет заливка с задержкой. Нажмите 'Остановить', чтобы прервать."
             )
             return
 
@@ -251,7 +255,7 @@ class Lab05App:
             new_point = self._apply_snap(
                 self.current_contour[-1],
                 new_point,
-                event.state,
+                int(event.state),
             )
             self._draw_segment(self.current_contour[-1], new_point)
 
@@ -281,7 +285,7 @@ class Lab05App:
 
     def _close_current_contour(self):
         if self.mode is InteractionMode.STEP_FILL:
-            self._update_status("Нельзя замкнуть контур в пошаговом режиме.")
+            self._update_status("Нельзя замкнуть контур во время заливки.")
             return
 
         if len(self.current_contour) < 3:
@@ -335,15 +339,17 @@ class Lab05App:
         intersections.sort()
         return intersections
 
-    def _paint_fill_pixel(self, x: int, y: int):
-        self.canvas.create_rectangle(
-            x,
+    def _paint_span(self, left: int, right: int, y: int):
+        if right < left:
+            return
+
+        self.canvas.create_line(
+            left,
             y,
-            x + 1,
-            y + 1,
+            right,
+            y,
             fill=self.fill_color,
-            outline=self.fill_color,
-            width=0,
+            width=1,
             tags=("fill",),
         )
 
@@ -364,10 +370,8 @@ class Lab05App:
                 continue
 
             painted_ranges.append((start_x, end_x))
-            for x in range(start_x, end_x + 1):
-                self._paint_fill_pixel(x, y)
+            self._paint_span(start_x, end_x, y)
 
-        self.canvas.tag_raise("geometry")
         return intersections, painted_ranges
 
     def _format_ranges(self, ranges: list[tuple[int, int]]) -> str:
@@ -405,6 +409,7 @@ class Lab05App:
         start_time = time.perf_counter()
         for y in range(self.fill_runtime.min_y, self.fill_runtime.max_y):
             self._paint_scanline(y)
+        self.canvas.tag_raise("geometry")
         self.canvas.update_idletasks()
         return (time.perf_counter() - start_time) * 1000.0
 
@@ -424,6 +429,7 @@ class Lab05App:
             return
 
         self.mode = InteractionMode.EDITING
+        self._stop_delayed_job()
         self.step_frame.pack_forget()
         self._set_edit_controls_state("normal")
 
@@ -441,14 +447,27 @@ class Lab05App:
         )
         self._update_status("Инстантная заливка выполнена.")
 
-    def _build_step_plan(self):
-        self.step_plan = [
-            FillStep.BUILD_EDGE_LIST,
-            FillStep.FIND_SCANLINE_RANGE,
-        ]
-        self.step_index = 0
+    def _read_delay_ms(self) -> int | None:
+        raw_value = self.delay_var.get().strip()
+        try:
+            delay_ms = int(raw_value)
+        except ValueError:
+            messagebox.showwarning(
+                "Некорректная задержка",
+                "Введите целое неотрицательное число миллисекунд.",
+            )
+            return None
 
-    def _start_step_mode(self):
+        if delay_ms < 0:
+            messagebox.showwarning(
+                "Некорректная задержка",
+                "Задержка должна быть неотрицательной.",
+            )
+            return None
+
+        return delay_ms
+
+    def _start_delayed_fill(self):
         if self.current_contour:
             messagebox.showwarning(
                 "Контур не замкнут",
@@ -463,6 +482,10 @@ class Lab05App:
             )
             return
 
+        delay_ms = self._read_delay_ms()
+        if delay_ms is None:
+            return
+
         self._reset_fill_layer()
         self._prepare_fill_runtime()
         if self.fill_runtime is None:
@@ -475,72 +498,72 @@ class Lab05App:
         self.mode = InteractionMode.STEP_FILL
         self._set_edit_controls_state("disabled")
         self.step_frame.pack(fill="x", pady=(10, 0))
-        self._build_step_plan()
         self.fill_runtime.current_y = self.fill_runtime.min_y
-        self._update_status("Пошаговый режим включен. Нажмите 'Дальше'.")
+        self._update_status(
+            f"Заливка с задержкой запущена (шаг: {delay_ms} мс на строку)."
+        )
+        self._schedule_next_scanline(delay_ms)
 
-    def _next_step(self):
-        if self.mode is not InteractionMode.STEP_FILL:
-            return
-
-        if self.fill_runtime is None:
-            self._update_status("Заливка не подготовлена.")
-            return
-
-        if self.step_index < len(self.step_plan):
-            step = self.step_plan[self.step_index]
-            if step is FillStep.BUILD_EDGE_LIST:
-                self._update_status(
-                    f"{FILL_STEP_MESSAGES[step]} Ребер: {len(self.fill_runtime.edges)}."
-                )
-            else:
-                self._update_status(
-                    f"{FILL_STEP_MESSAGES[step]} Диапазон: {self.fill_runtime.min_y}.."
-                    f"{self.fill_runtime.max_y - 1}."
-                )
-
-            self.step_index += 1
+    def _schedule_next_scanline(self, delay_ms: int):
+        if self.mode is not InteractionMode.STEP_FILL or self.fill_runtime is None:
             return
 
         if self.fill_runtime.current_y >= self.fill_runtime.max_y:
-            self._update_status("Пошаговая заливка завершена.")
+            self._finish_delayed_fill()
             return
 
-        intersections, ranges = self._paint_scanline(self.fill_runtime.current_y)
+        current_y = self.fill_runtime.current_y
+        intersections, ranges = self._paint_scanline(current_y)
         self._update_status(
-            f"{FILL_STEP_MESSAGES[FillStep.NEXT_SCANLINE]} "
-            f"y={self.fill_runtime.current_y}, "
-            f"пересечений: {len(intersections)}, "
-            f"интервалы: {self._format_ranges(ranges)}."
+            f"y={current_y}, пересечений: {len(intersections)}, "
+            f"интервалов: {len(ranges)}."
         )
         self.fill_runtime.current_y += 1
-
+        self.canvas.tag_raise("geometry")
         self.canvas.update_idletasks()
-        self.step_index += 1
 
-    def _exit_step_mode(self):
+        self.fill_after_id = self.root.after(
+            delay_ms,
+            lambda: self._schedule_next_scanline(delay_ms),
+        )
+
+    def _finish_delayed_fill(self):
+        self._stop_delayed_job()
+        self.mode = InteractionMode.EDITING
+        self.step_frame.pack_forget()
+        self._set_edit_controls_state("normal")
+        self._update_status("Заливка с задержкой завершена.")
+
+    def _stop_delayed_job(self):
+        if self.fill_after_id is not None:
+            self.root.after_cancel(self.fill_after_id)
+            self.fill_after_id = None
+
+    def _cancel_delayed_fill(self):
         if self.mode is not InteractionMode.STEP_FILL:
             return
 
+        self._stop_delayed_job()
         self.mode = InteractionMode.EDITING
         self.step_frame.pack_forget()
         self._set_edit_controls_state("normal")
         self._reset_fill_layer()
         self.fill_runtime = None
         self._update_status(
-            "Выход из пошагового режима. Можно продолжать ввод контуров."
+            "Заливка с задержкой остановлена. Можно продолжать ввод контуров."
         )
 
-    def _set_edit_controls_state(self, state: str):
+    def _set_edit_controls_state(self, state: Literal["normal", "disabled"]):
         self.btn_close.config(state=state)
         self.btn_fill.config(state=state)
         self.btn_fill_step.config(state=state)
         self.btn_clear.config(state=state)
         self.btn_choose_color.config(state=state)
+        self.delay_entry.config(state=state)
 
     def _clear_canvas(self):
         if self.mode is InteractionMode.STEP_FILL:
-            self._exit_step_mode()
+            self._cancel_delayed_fill()
 
         self.canvas.delete("all")
         self.contours.clear()
