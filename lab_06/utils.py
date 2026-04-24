@@ -1,0 +1,21 @@
+from dataclasses import dataclass
+
+
+WINDOW_WIDTH = 1300
+WINDOW_HEIGHT = 900
+LEFT_PANEL_WIDTH = 340
+CANVAS_WIDTH = 920
+CANVAS_HEIGHT = 860
+
+BACKGROUND_COLOR = "#111111"
+BOUNDARY_COLOR = "#FFFFFF"
+SEED_MARKER_COLOR = "#00E676"
+
+DEFAULT_DELAY_MS = 8
+MAX_DELAY_MS = 100
+
+
+@dataclass(frozen=True)
+class Point:
+    x: int
+    y: int
