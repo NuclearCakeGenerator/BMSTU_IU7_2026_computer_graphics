@@ -620,7 +620,7 @@ class Lab08App:
             return None
 
         vertices = self.clipper_vertices
-        d = vec_sub(segment.end, segment.start)
+        segment_vec = vec_sub(segment.end, segment.start) # segment vector
 
         orientation = self._polygon_orientation(vertices)
         ccw = orientation > 0
@@ -631,15 +631,15 @@ class Lab08App:
         for i in range(len(vertices)):
             p_i = vertices[i]
             p_j = vertices[(i + 1) % len(vertices)]
-            edge = vec_sub(p_j, p_i)
+            edge = vec_sub(p_j, p_i) # edge vector
 
             if ccw:
                 normal = Point(edge.y, -edge.x)
             else:
                 normal = Point(-edge.y, edge.x)
 
-            w = vec_sub(segment.start, p_i)
-            d_dot_n = dot(d, normal)
+            w = vec_sub(segment.start, p_i) # vector from edge start to segment start
+            d_dot_n = dot(segment_vec, normal)
             w_dot_n = dot(w, normal)
 
             if abs(d_dot_n) < EPS:
@@ -659,12 +659,12 @@ class Lab08App:
                 return None
 
         start = Point(
-            segment.start.x + d.x * t_enter,
-            segment.start.y + d.y * t_enter,
+            segment.start.x + segment_vec.x * t_enter,
+            segment.start.y + segment_vec.y * t_enter,
         )
         end = Point(
-            segment.start.x + d.x * t_leave,
-            segment.start.y + d.y * t_leave,
+            segment.start.x + segment_vec.x * t_leave,
+            segment.start.y + segment_vec.y * t_leave,
         )
         return Segment(start, end)
 
